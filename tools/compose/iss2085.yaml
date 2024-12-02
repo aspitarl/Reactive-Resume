@@ -1,0 +1,95 @@
+version: "3.8"
+
+services:
+  # Database (Postgres)
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Storage (for image uploads)
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data
+    ports:
+      - ${MINIO_PORT:-9000}:9000
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+  # Chrome Browser (for printing and previews)
+  chrome:
+    image: browserless/chrome:1.61.0-puppeteer-21.4.1
+    restart: unless-stopped
+    environment:
+      TOKEN: ${CHROME_TOKEN}
+      EXIT_ON_HEALTH_FAILURE: 1
+      PRE_REQUEST_HEALTH_CHECK: 1
+
+  # Redis (for cache & server session management)
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+
+  # Main Application
+  app:
+    image: amruthpillai/reactive-resume:latest
+    restart: unless-stopped
+    ports:
+      - ${APP_PORT:-3000}:3000
+    depends_on:
+      - postgres
+      - minio
+      - redis
+      - chrome
+    environment:
+      # -- Environment Variables --
+      PORT: 3000
+      NODE_ENV: production
+
+      # -- URLs --
+      PUBLIC_URL: http://localhost:${APP_PORT:-3000}
+      STORAGE_URL: http://localhost:${MINIO_PORT:-9000}
+
+      # -- Printer (Chrome) --
+      CHROME_TOKEN: ${CHROME_TOKEN}
+      CHROME_URL: ws://chrome:3000
+
+      # -- Database (Postgres) --
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/postgres
+
+      # -- Auth --
+      ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET}
+
+      # -- Emails --
+      MAIL_FROM: noreply@localhost
+
+      # -- Storage (Minio) --
+      STORAGE_ENDPOINT: minio
+      STORAGE_PORT: ${MINIO_PORT:-9000}
+      STORAGE_BUCKET: default
+      STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER}
+      STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      STORAGE_USE_SSL: 0
+
+      # -- Cache (Redis) --
+      REDIS_URL: redis://default:${REDIS_PASSWORD}@redis:6379
+
+volumes:
+  postgres_data:
+  minio_data:
